@@ -1,0 +1,7 @@
+# The deployable web app is the Vite + React frontend in /frontend.
+# The repository root has no package.json, so builds must run from there.
+[build]
+  base = "frontend"
+  # Install frontend dependencies first so Vite is present in node_modules
+  command = "npm install --include=dev && npm run build"
+  publish = "dist"
