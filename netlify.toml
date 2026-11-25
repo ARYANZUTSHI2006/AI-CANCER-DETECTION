@@ -1,0 +1,5 @@
+[build]
+  # The deployable web app is the Vite + React frontend in /frontend
+  base = "frontend"
+  command = "npm install --include=dev && npm run build"
+  publish = "dist"
