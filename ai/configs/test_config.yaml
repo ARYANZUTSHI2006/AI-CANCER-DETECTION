@@ -1,0 +1,51 @@
+# Test configuration for quick validation
+data:
+  dataset_path: "data/raw/train_data"
+  labels_file: "data/raw/Data_Entry_2017_v2020.csv"
+  image_size: 224
+  batch_size: 2  # Small batch for testing
+  num_workers: 0  # Avoid multiprocessing issues on Windows
+  train_split: 0.6
+  val_split: 0.2
+  test_split: 0.2
+  
+# Data augmentation parameters
+augmentation:
+  horizontal_flip: 0.5
+  rotation_range: 15
+  brightness: 0.2
+  contrast: 0.2
+  zoom_range: 0.1
+  
+# Training parameters
+training:
+  epochs: 2  # Just 2 epochs for testing
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  optimizer: "adam"
+  scheduler: "cosine"
+  early_stopping_patience: 5
+  save_best_only: true
+  
+# Model parameters
+model:
+  architecture: "custom_cnn"  # Use custom CNN for faster testing
+  pretrained: false  # No pretrained weights for testing
+  num_classes: 1  # Binary classification
+  dropout: 0.5
+  
+# Loss function
+loss:
+  type: "bce"  # binary cross entropy
+  pos_weight: 2.0  # Weight for positive class (cancer)
+  
+# Evaluation
+evaluation:
+  threshold: 0.5
+  metrics: ["accuracy", "precision", "recall", "f1", "auc"]
+  
+# Paths
+paths:
+  checkpoints: "experiments/checkpoints"
+  logs: "experiments/logs"
+  results: "experiments/results"
