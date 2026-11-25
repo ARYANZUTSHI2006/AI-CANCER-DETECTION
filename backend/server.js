@@ -8,12 +8,17 @@ const path = require('path');
 const fs = require('fs').promises;
 const { existsSync } = require('fs');
 const { spawn } = require('child_process');
+const os = require('os');
+const { createSession, downloadModel, predictImage } = require('./onnx-inference');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const PROJECT_ROOT = path.join(__dirname, '..');
 const DEFAULT_CHECKPOINT_PATH = path.join(PROJECT_ROOT, 'Models', 'best_model.pth');
 const DEFAULT_CONFIG_PATH = path.join(PROJECT_ROOT, 'ai', 'configs', 'config.yaml');
+const ONNX_MODEL_PATH = process.env.ONNX_MODEL_PATH || path.join(os.tmpdir(), 'cancer-detection.onnx');
+let onnxSession = null;
+let onnxModelError = null;
 
 function getInferencePaths() {
   return {
@@ -185,35 +190,39 @@ app.post('/predict', upload.single('image'), async (req, res) => {
 
     const imagePath = req.file.path;
     
-    const { checkpointPath, configPath } = getInferencePaths();
-
-    // Check if checkpoint exists
-    try {
-      await fs.access(checkpointPath);
-    } catch {
-      await fs.unlink(imagePath); // Clean up uploaded file
-      return res.status(500).json({ 
-        error: 'Model checkpoint not found',
-        message: 'Check CHECKPOINT_PATH or place a model checkpoint at Models/best_model.pth',
-        expectedPath: checkpointPath,
-      });
-    }
-
-    // Run inference
-    console.log(`Processing image: ${imagePath}`);
-    const output = await runPythonInference(imagePath, checkpointPath, configPath);
-    const result = parsePythonOutput(output);
-
-    // Read Grad-CAM image if generated
     let gradcamBase64 = null;
-    if (result.gradcamPath) {
+    let result;
+
+    if (onnxSession) {
+      result = await predictImage(onnxSession, imagePath);
+      gradcamBase64 = result.gradcamImage;
+    } else {
+      const { checkpointPath, configPath } = getInferencePaths();
+
       try {
-        const gradcamData = await fs.readFile(result.gradcamPath);
-        gradcamBase64 = `data:image/png;base64,${gradcamData.toString('base64')}`;
-        // Clean up Grad-CAM file
-        await fs.unlink(result.gradcamPath);
-      } catch (error) {
-        console.error('Error reading Grad-CAM:', error);
+        await fs.access(checkpointPath);
+      } catch {
+        await fs.unlink(imagePath);
+        return res.status(500).json({
+          error: 'Model checkpoint not found',
+          message: onnxModelError
+            || 'Check CHECKPOINT_PATH or configure ONNX_MODEL_URL for ONNX inference',
+          expectedPath: checkpointPath
+        });
+      }
+
+      console.log(`Processing image: ${imagePath}`);
+      const output = await runPythonInference(imagePath, checkpointPath, configPath);
+      result = parsePythonOutput(output);
+
+      if (result.gradcamPath) {
+        try {
+          const gradcamData = await fs.readFile(result.gradcamPath);
+          gradcamBase64 = `data:image/png;base64,${gradcamData.toString('base64')}`;
+          await fs.unlink(result.gradcamPath);
+        } catch (error) {
+          console.error('Error reading Grad-CAM:', error);
+        }
       }
     }
 
@@ -267,8 +276,9 @@ app.post('/predict-batch', upload.array('images', 10), async (req, res) => {
 
     for (const file of req.files) {
       try {
-        const output = await runPythonInference(file.path, checkpointPath, configPath);
-        const result = parsePythonOutput(output);
+        const result = onnxSession
+          ? await predictImage(onnxSession, file.path)
+          : parsePythonOutput(await runPythonInference(file.path, checkpointPath, configPath));
         
         results.push({
           filename: file.originalname,
@@ -316,8 +326,11 @@ app.get('/status', async (req, res) => {
 
   res.json({
     status: 'running',
-    modelAvailable: modelAvailable,
+    modelAvailable: Boolean(onnxSession) || modelAvailable,
+    modelPath: onnxSession ? ONNX_MODEL_PATH : checkpointPath,
     checkpointPath: checkpointPath,
+    inferenceEngine: onnxSession ? 'onnx' : 'python',
+    modelError: onnxModelError,
     timestamp: new Date().toISOString()
   });
 });
@@ -332,14 +345,37 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`\n🚀 Cancer Detection API Server`);
-  console.log(`📍 Server running on http://localhost:${PORT}`);
-  console.log(`\n📋 Available endpoints:`);
-  console.log(`   GET  /          - API information`);
-  console.log(`   GET  /health    - Health check`);
-  console.log(`   POST /predict   - Single image prediction`);
-  console.log(`   POST /predict-batch - Batch prediction`);
-  console.log(`   GET  /status    - Server status\n`);
+async function startServer() {
+  if (process.env.ONNX_MODEL_URL || existsSync(ONNX_MODEL_PATH)) {
+    try {
+      if (process.env.ONNX_MODEL_URL) {
+        await downloadModel(
+          process.env.ONNX_MODEL_URL,
+          ONNX_MODEL_PATH,
+          process.env.ONNX_MODEL_SHA256
+        );
+      }
+      onnxSession = await createSession(ONNX_MODEL_PATH);
+      console.log('ONNX model loaded successfully');
+    } catch (error) {
+      onnxModelError = error.message;
+      console.error('ONNX model initialization failed:', error);
+    }
+  }
+
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Cancer Detection API Server`);
+    console.log(`📍 Server running on http://localhost:${PORT}`);
+    console.log(`\n📋 Available endpoints:`);
+    console.log(`   GET  /          - API information`);
+    console.log(`   GET  /health    - Health check`);
+    console.log(`   POST /predict   - Single image prediction`);
+    console.log(`   POST /predict-batch - Batch prediction`);
+    console.log(`   GET  /status    - Server status\n`);
+  });
+}
+
+startServer().catch(error => {
+  console.error('Failed to start the API server:', error);
+  process.exitCode = 1;
 });

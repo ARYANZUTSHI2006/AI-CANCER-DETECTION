@@ -464,10 +464,21 @@ Get server and model status.
 {
   "status": "running",
   "modelAvailable": true,
+  "inferenceEngine": "onnx",
+  "modelError": null,
+  "modelPath": "/tmp/cancer-detection.onnx",
   "checkpointPath": "../ai/experiments/.../best_model.pth",
   "timestamp": "2025-11-03T12:00:00.000Z"
 }
 ```
+
+For a Node-only deployment, set `ONNX_MODEL_URL` to an HTTPS ONNX release asset and
+`ONNX_MODEL_SHA256` to its 64-character SHA-256 digest. The backend downloads the
+model at startup, verifies the digest, and runs CPU inference with ONNX Runtime.
+The public inference-only model used by this deployment is
+[cancer_resnet50.onnx](https://github.com/ARYANZUTSHI2006/ai-cancer-detection-onnx-model/releases/download/v1.0.0/cancer_resnet50.onnx);
+its digest is `7988880c70a893eb08b38adc915b378045ff77fc441ca845c538fbd383dcbde4`.
+ONNX mode returns predictions without a Grad-CAM image (`gradcamImage` is `null`).
 
 ### Error Responses
 
